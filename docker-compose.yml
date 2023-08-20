@@ -1,0 +1,139 @@
+version: "3"
+
+services:
+  ### X-UI panel ###
+  xui:
+    image: alireza7/x-ui
+    container_name: xui
+    restart: unless-stopped
+    volumes:
+      - $PWD/etc/x-ui:/etc/x-ui/
+    ports:
+        # XRay Reality
+      - "443:443"
+        # shadowsocket
+      - "33000:33000"
+    environment:
+      XRAY_VMESS_AEAD_FORCED: ${XRAY_VMESS_AEAD_FORCED}
+      XUI_LOG_LEVEL: ${XUI_LOG_LEVEL}
+      XUI_DEBUG: ${XUI_DEBUG}
+      XUI_BIN_FOLDER: ${XUI_BIN_FOLDER}
+      XUI_DB_FOLDER: ${XUI_DB_FOLDER}
+      TZ: ${TZ}
+    labels:
+      - "traefik.enable=true"
+      # WebUI http router
+      - "traefik.http.routers.xui-web-http.rule=Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`)"
+      - "traefik.http.routers.xui-web-http.entrypoints=xui"
+      - "traefik.http.routers.xui-web-http.service=xui-web-config"
+      - "traefik.http.routers.xui-web-http.middlewares=xui-web-https"
+      # WebUI http middlewares
+      - "traefik.http.middlewares.xui-web-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.xui-web-https.redirectscheme.port=${TRAEFIK_XUI_INTERNAL_PORT}"
+      # WebUI https router
+      - "traefik.http.routers.xui-web.rule=Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`)"
+      - "traefik.http.routers.xui-web.entrypoints=xui"
+      - "traefik.http.routers.xui-web.tls=true"
+      - "traefik.http.routers.xui-web.tls.certresolver=xui-resolver"
+      - "traefik.http.routers.xui-web.service=xui-web-config"
+      # WebUI service
+      - "traefik.http.services.xui-web-config.loadbalancer.server.port=${TRAEFIK_XUI_INTERNAL_PORT}"
+      # Subscriptions http middlewares
+      - "traefik.http.middlewares.sub-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.sub-to-https.redirectscheme.port=${TRAEFIK_SUB_ENTRYPOINT_PORT}"
+      # Subscriptions http router
+      - "traefik.http.routers.xui-sub-http.rule=Host(`sssub-${APP_DOMAIN}`) && PathPrefix(`/sub`)"
+      - "traefik.http.routers.xui-sub-http.entrypoints=xui-sub"
+      - "traefik.http.routers.xui-sub-http.service=xui-subscription"
+      - "traefik.http.routers.xui-sub-http.middlewares=sub-to-https"
+      # Subscriptions https router
+      - "traefik.http.routers.xui-sub.rule=Host(`sssub-${APP_DOMAIN}`) && PathPrefix(`/sub`)"
+      - "traefik.http.routers.xui-sub.entrypoints=xui-sub"
+      - "traefik.http.routers.xui-sub.tls=true"
+      - "traefik.http.routers.xui-sub.tls.certresolver=xui-resolver"
+      - "traefik.http.routers.xui-sub.service=xui-subscription"
+      # Subscriptions service
+      - "traefik.http.services.xui-subscription.loadbalancer.server.port=${TRAEFIK_SUB_INTERNAL_PORT}"
+      # route requests to our server to original M$ site
+      - "traefik.tcp.routers.vless.rule=HostSNI(`www.microsoft.com`) || HostSNI(`microsoft.com`)"
+      - "traefik.tcp.routers.vless.tls.passthrough=true"
+      - "traefik.tcp.routers.vless.service=xui-reality"
+      - "traefik.tcp.services.xui-reality.loadbalancer.server.port=443"
+    networks:
+      xui_net:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100M"
+        max-file: "10"
+
+  #### traefik
+  traefik:
+    image: traefik:v2.10
+    container_name: xui-traefik
+    restart: unless-stopped
+    ports:
+      # X-UI Web UI (served by traefik)
+      - "${TRAEFIK_XUI_ENTRYPOINT_PORT}:${TRAEFIK_XUI_ENTRYPOINT_PORT}"
+      # Subscriptions service
+      - "${TRAEFIK_SUB_ENTRYPOINT_PORT}:${TRAEFIK_SUB_ENTRYPOINT_PORT}"
+      # traefik dashboard http (redirected to 8443) used by Let's Encrypt
+      - "80:80"
+      # traefik dashboard https
+      - "8443:8443"
+    command:
+      - --global.sendanonymoususage=false
+      - --global.checknewversion=false
+      - --providers.docker=true
+      - --providers.docker.exposedbydefault=false
+      - --providers.docker.swarmmode=false
+      - --providers.docker.watch=true
+      - --providers.docker.endpoint=unix:///var/run/docker.sock
+      - --providers.file.directory=/traefik-dynamic-conf
+      - --providers.file.watch=true
+      - --entrypoints.xui.address=:${TRAEFIK_XUI_ENTRYPOINT_PORT}
+      - --entrypoints.xui-sub.address=:${TRAEFIK_SUB_ENTRYPOINT_PORT}
+      - --entrypoints.dashboard-http.address=:80
+      - --entrypoints.dashboard.address=:8443
+      - --certificatesresolvers.xui-resolver.acme.email=${LETS_ENCRYPT_EMAIL}
+      - --certificatesresolvers.xui-resolver.acme.storage=${LETS_ENCRYPT_STORAGE_PATH}
+      - --certificatesresolvers.xui-resolver.acme.httpchallenge.entrypoint=dashboard-http
+      - --api=true
+      - --api.dashboard=true
+      - --ping.entrypoint=dashboard
+      - --log.level=${LOG_LEVEL}
+      - --accesslog=true
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock
+      - $PWD/config/traefik-dynamic-conf:/traefik-dynamic-conf
+      - $PWD/log:/var/log/traefik
+      - $PWD/certs/acme.json:/certs/acme.json # tls certs storage
+    networks:
+      xui_net:
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "100M"
+        max-file: "10"
+    labels:
+      - "traefik.enable=true"
+
+      - "traefik.http.middlewares.dashboard-to-https.redirectscheme.scheme=https"
+      - "traefik.http.middlewares.dashboard-to-https.redirectscheme.port=8443"
+      - "traefik.http.middlewares.dashboard-basic-auth.basicauth.users=${DASHBOARD_HTPASSWD}"
+
+      - "traefik.http.routers.dashboard-http.rule=hostregexp(`{host:.+}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.dashboard-http.entrypoints=dashboard"
+      - "traefik.http.routers.dashboard-http.middlewares=dashboard-to-https"
+      - "traefik.http.routers.dashboard-http.service=api@internal"
+
+      - "traefik.http.routers.dashboard-https.rule=Host(`${APP_DOMAIN}`) && (PathPrefix(`/api`) || PathPrefix(`/dashboard`))"
+      - "traefik.http.routers.dashboard-https.entrypoints=dashboard"
+      - "traefik.http.routers.dashboard-https.service=api@internal"
+      - "traefik.http.routers.dashboard-https.middlewares=dashboard-basic-auth"
+      - "traefik.http.routers.dashboard-https.tls=true"
+      - "traefik.http.routers.dashboard-https.tls.certresolver=xui-resolver"
+
+networks:
+  xui_net:
+

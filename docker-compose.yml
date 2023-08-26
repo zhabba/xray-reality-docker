@@ -23,7 +23,7 @@ services:
     labels:
       - "traefik.enable=true"
       # WebUI http router
-      - "traefik.http.routers.xui-web-http.rule=Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`)"
+      - "traefik.http.routers.xui-web-http.rule=(Host(`xui-${APP_DOMAIN}`)) || (Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`))"
       - "traefik.http.routers.xui-web-http.entrypoints=xui"
       - "traefik.http.routers.xui-web-http.service=xui-web-config"
       - "traefik.http.routers.xui-web-http.middlewares=xui-web-https"
@@ -31,7 +31,7 @@ services:
       - "traefik.http.middlewares.xui-web-https.redirectscheme.scheme=https"
       - "traefik.http.middlewares.xui-web-https.redirectscheme.port=${TRAEFIK_XUI_INTERNAL_PORT}"
       # WebUI https router
-      - "traefik.http.routers.xui-web.rule=Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`)"
+      - "traefik.http.routers.xui-web.rule=(Host(`xui-${APP_DOMAIN}`)) || (Host(`xui-${APP_DOMAIN}`) && PathPrefix(`/{path:.+}`))"
       - "traefik.http.routers.xui-web.entrypoints=xui"
       - "traefik.http.routers.xui-web.tls=true"
       - "traefik.http.routers.xui-web.tls.certresolver=xui-resolver"
